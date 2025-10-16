@@ -38,11 +38,12 @@ type SwapCardProps = {
   onChangeTo: (v: string) => void;
   onChangeInput: (v: string) => void;
   onSwapTokens: () => void;
-  onChangeFee: (v: number) => void;
   onConfirm: () => void;
   disabled?: boolean;
   isSubmitting?: boolean;
   totalFee?: string;
+  onChangeFeeRaw: (v: number) => void; // gọi mỗi pixel
+  onCommitFee: (v: number) => void;
 };
 
 export function SwapCard({
@@ -57,8 +58,9 @@ export function SwapCard({
   onChangeTo,
   onChangeInput,
   onSwapTokens,
-  onChangeFee,
+  onChangeFeeRaw,
   onConfirm,
+  onCommitFee,
   disabled,
   isSubmitting = false,
   totalFee,
@@ -120,7 +122,8 @@ export function SwapCard({
                       min={0}
                       max={5}
                       step={0.1}
-                      onValueChange={(v) => onChangeFee(v[0])}
+                      onValueChange={(arr) => onChangeFeeRaw(arr[0])}
+                      onValueCommit={(arr) => onCommitFee(arr[0])}
                     />
                     <div className="w-16 text-right text-soft">
                       {fee.toFixed(1)}%
@@ -251,7 +254,7 @@ export function SwapCard({
             <div>
               {totalFee && (
                 <span className="text-[12px] font-semibold">
-                  {fee}% Fee: {totalFee} {to}
+                  {fee}% Fee: {totalFee} {from}
                 </span>
               )}
             </div>

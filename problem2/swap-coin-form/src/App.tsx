@@ -1,24 +1,30 @@
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { SwapCard } from "@/components/SwapCard";
-import { useEffect, useState } from "react";
 import {
   SwapCoinBody,
   type SwapCoinBodyType,
 } from "./schemaValidations/swap.schema";
 import { fetchPrices, type PricesMap } from "./lib/tokenUtils";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+const clamp = (x: number) => Math.min(Math.max(x, 0), 100);
 
 export default function App() {
   const [prices, setPrices] = useState<PricesMap>({});
   const [tokens, setTokens] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [output, setOutput] = useState<string>("");
-  const [totalFee, setTotalFee] = useState<string>();
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const {
     setValue,
-    watch,
+    control,
     handleSubmit,
     formState: { isValid, errors },
   } = useForm<SwapCoinBodyType>({
@@ -33,6 +39,15 @@ export default function App() {
     },
   });
 
+  const from = useWatch({ control, name: "from" });
+  const to = useWatch({ control, name: "to" });
+  const feePct = useWatch({ control, name: "feePct" });
+
+  const [inputRaw, setInputRaw] = useState("");
+  const deferredInput = useDeferredValue(inputRaw);
+  const [feeRaw, setFeeRaw] = useState<number>(feePct ?? 0.3);
+  const deferredFee = useDeferredValue(feeRaw);
+
   // load prices
   useEffect(() => {
     (async () => {
@@ -43,47 +58,84 @@ export default function App() {
         setTokens(syms);
         const fromDefault = syms.includes("USDC") ? "USDC" : syms[0];
         const toDefault = syms.find((s) => s !== fromDefault) ?? syms[1];
-        setValue("from", fromDefault, { shouldValidate: true });
-        setValue("to", toDefault, { shouldValidate: true });
+        setValue("from", fromDefault, { shouldValidate: false });
+        setValue("to", toDefault, { shouldValidate: false });
       } finally {
         setLoading(false);
       }
     })();
   }, [setValue]);
 
-  const from = watch("from");
-  const to = watch("to");
-  const inputAmount = watch("inputAmount");
-  const feePct = watch("feePct");
-
-  const priceFrom = prices[from];
-  const priceTo = prices[to];
-  const rate = priceFrom && priceTo ? priceFrom / priceTo : undefined;
-  const eff = 1 - Math.max(0, feePct) / 100;
-
-  // compute output
   useEffect(() => {
-    const value = Number(inputAmount);
-    if (rate && Number.isFinite(value) && value > 0) {
-      const outputValue = value * eff * rate;
-      const feeValue = (value * rate * Math.max(0, feePct)) / 100;
-      setOutput(String(outputValue));
-      setTotalFee(String(feeValue));
-    } else {
-      setOutput("");
-      setTotalFee(undefined);
-    }
-  }, [inputAmount, eff, rate, feePct]);
+    setValue("inputAmount", deferredInput, {
+      shouldValidate: false,
+      shouldDirty: true,
+    });
+  }, [deferredInput, setValue]);
 
-  const rateText = rate ? `1 ${from} ≈ ${String(rate)} ${to}` : "";
+  const priceFrom = prices[from ?? ""];
+  const priceTo = prices[to ?? ""];
+  const rate = useMemo(
+    () => (priceFrom && priceTo ? priceFrom / priceTo : undefined),
+    [priceFrom, priceTo]
+  );
 
-  const onSubmit = async () => {
-    setIsSubmitting(true);
+  const feeClamped = clamp(deferredFee ?? 0);
+  const eff = useMemo(() => 1 - feeClamped / 100, [feeClamped]);
+
+  const inputNum = useMemo(() => Number(deferredInput) || 0, [deferredInput]);
+
+  const outputNum = useMemo(() => {
+    if (!rate || !Number.isFinite(inputNum) || inputNum <= 0) return 0;
+    return inputNum * eff * rate;
+  }, [inputNum, eff, rate]);
+
+  const totalFeeNum = useMemo(() => {
+    if (!rate || !Number.isFinite(inputNum) || inputNum <= 0) return 0;
+    return (inputNum * feeClamped) / 100;
+  }, [inputNum, rate, feeClamped]);
+
+  const output = outputNum > 0 ? String(outputNum) : "";
+  const totalFee = totalFeeNum > 0 ? String(totalFeeNum) : undefined;
+
+  const rateText = useMemo(
+    () => (rate ? `1 ${from} ≈ ${String(rate)} ${to}` : ""),
+    [rate, from, to]
+  );
+
+  const onChangeFrom = useCallback(
+    (v: string) => {
+      setValue("from", v, { shouldValidate: false });
+      if (v === to) {
+        const next = tokens.find((t) => t !== v) ?? v;
+        setValue("to", next, { shouldValidate: false });
+      }
+    },
+    [setValue, to, tokens]
+  );
+
+  const onChangeTo = useCallback(
+    (v: string) => setValue("to", v, { shouldValidate: false }),
+    [setValue]
+  );
+
+  const onChangeInput = useCallback((v: string) => {
+    setInputRaw(v);
+  }, []);
+
+  const onSwapTokens = useCallback(() => {
+    const f = from!;
+    setValue("from", to!, { shouldValidate: false });
+    setValue("to", f, { shouldValidate: false });
+  }, [from, to, setValue]);
+
+  const onSubmit = useCallback(async () => {
     if (!rate || !isValid) return;
-    await new Promise((r) => setTimeout(r, 1000)); // fake backend
+    setIsSubmitting(true);
+    await new Promise((r) => setTimeout(r, 1000));
     setIsSubmitting(false);
     alert("✅ Swap submitted!");
-  };
+  }, [rate, isValid]);
 
   if (loading) {
     return (
@@ -102,31 +154,22 @@ export default function App() {
     <>
       <SwapCard
         tokens={tokens}
-        from={from}
-        to={to}
-        input={inputAmount}
+        from={from!}
+        to={to!}
+        input={inputRaw}
         output={output}
         rateText={rateText}
-        fee={feePct}
-        onChangeFrom={(v) => {
-          setValue("from", v);
-          if (v === to) {
-            const next = tokens.find((t) => t !== v) ?? v;
-            setValue("to", next);
-          }
-        }}
-        onChangeTo={(v) => setValue("to", v)}
-        onChangeInput={(v) => setValue("inputAmount", v)}
-        onSwapTokens={() => {
-          const f = from;
-          setValue("from", to);
-          setValue("to", f);
-        }}
-        onChangeFee={(v) => setValue("feePct", v)}
+        fee={feeRaw}
+        onChangeFrom={onChangeFrom}
+        onChangeTo={onChangeTo}
+        onChangeInput={onChangeInput}
+        onSwapTokens={onSwapTokens}
+        onChangeFeeRaw={setFeeRaw}
         onConfirm={handleSubmit(onSubmit)}
-        disabled={!isValid || !rate}
+        disabled={!rate || !isValid}
         isSubmitting={isSubmitting}
         totalFee={totalFee}
+        onCommitFee={(v) => setValue("feePct", v, { shouldValidate: false })}
       />
 
       {/* error common */}
