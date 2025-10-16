@@ -1,0 +1,20 @@
+PROBLEM IN CODE
+
+1. WalletBalance lacks blockchain, but code uses balance.blockchain.
+2. getPriority(blockchain: any) uses any type -> loses type safety and IntelliSense
+3. getPriority in render scope: Defined inside component -> new function identity each render; minor, but can live outside to avoid re-creation.
+4. lhsPriority not be define before use -> runtime error
+5. logic of sortedBalances is conflict: just get balance.amount <= 0
+6. The priority numbers of the items do not need to be that far apart.
+7. sortedBalances depends on prices in useMemo even though prices are not used → redundant re-compute.
+8. getPriority function be call many time in .sort() comparator  -> waste compute
+9. Comparator missing branch else to returns 0 when equal (not wrong but less clear).
+10. formattedBalances are created but not used anywhere -> redundant calculations.
+11. use .toFixed() but does not pass decimal numbers, should not format the balance with this
+12. Assigning FormattedWalletBalance type to sortedBalances element (actually WalletBalance) -> wrong type.
+13. key={index} in .map() -> key is unstable when order/sort
+14. usdValue = prices[balance.currency] * balance.amount not have fallback when value = undefined -> NaN
+15. BoxProps unknown
+16. Get children from props but not render below
+17. classes.row not been define yet
+18. Spread ...rest into <div> can push strange props (from BoxProps) down to DOM -> React warning.
